@@ -33,8 +33,8 @@ jobs:
           $QtVersion = "${{ inputs.qt_version }}"
           if ([string]::IsNullOrEmpty($QtVersion)) { $QtVersion = "5.15.2" }
 
-          Write-Host "Installing Qt $QtVersion windows desktop win64_msvc2019_64 ..."
-          python -m aqt install-qt windows desktop $QtVersion win64_msvc2019_64 -m qtwebengine
+          Write-Host "Installing Qt $QtVersion windows desktop win64_msvc2019_64 to C:\Qt ..."
+          python -m aqt install-qt -O C:\Qt windows desktop $QtVersion win64_msvc2019_64 -m qtwebengine
 
           # aqt 目录名可能带或不带 win64_ 前缀, 探测实际安装位置
           $qtRoot = "C:\Qt\$QtVersion"
