@@ -36,7 +36,7 @@ jobs:
           $MsvcArch  = "win64_msvc2019_64"
           
           Write-Host "Installing Qt $QtVersion $MsvcArch ..."
-          python -m aqt install-qt windows desktop $QtVersion $MsvcArch qtwebengine
+          python -m aqt install-qt windows desktop $QtVersion $MsvcArch
           
           $QtPath = "C:\Qt\$QtVersion\$MsvcArch"
           if (-not (Test-Path "$QtPath\bin\qmake.exe")) {
