@@ -29,7 +29,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           # aqtinstall 3.x 不兼容 Qt 5.12, 固定 2.5.x
-          python -m pip install "aqtinstall==2.5.*"
+          python -m pip install "aqtinstall==2.2.4"
           
           $QtVersion = "${{ inputs.qt_version }}"
           $MsvcArch  = "msvc2017_64"
