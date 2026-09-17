@@ -18,7 +18,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-cmake_minimum_required (VERSION 2.8)
+cmake_minimum_required (VERSION 3.5)
 project (cryptopp)
 
 option (CRYPTOPP_FIPS_COMPLIANT "CryptoPP FIPS 140 compliant" OFF)
@@ -134,9 +134,13 @@ if (TARGET cryptopp)
   list (APPEND _CRYPTOPP_INSTALL_TARGETS cryptopp)
 endif (TARGET cryptopp)
 
-if (APPLE)
+# The .asm source files are not compiled in this build, so Crypto++ must use
+# its C++ fallbacks instead of the assembler-optimized routines (otherwise the
+# link fails with unresolved Rijndael_Enc_AdvancedProcessBlocks, Baseline_Add,
+# Baseline_Sub, X86_SHA256_HashBlocks, ...).
+if (APPLE OR WIN32)
     add_definitions (-DCRYPTOPP_DISABLE_ASM)
-endif (APPLE)
+endif (APPLE OR WIN32)
 
 if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
     set_target_properties (${_CRYPTOPP_INSTALL_TARGETS} PROPERTIES COMPILE_FLAGS
@@ -174,15 +178,15 @@ if (TARGET dlltest)
 endif (TARGET dlltest)
 
 if (WIN32)
-  get_target_property (_TEMP cryptopp COMPILE_DEFINITIONS)
-
-  if (NOT _TEMP)
-    unset (_TEMP)
-  endif (NOT _TEMP)
-
-  list (APPEND _TEMP _USRDLL)
-
   if (TARGET cryptopp)
+    get_target_property (_TEMP cryptopp COMPILE_DEFINITIONS)
+
+    if (NOT _TEMP)
+      unset (_TEMP)
+    endif (NOT _TEMP)
+
+    list (APPEND _TEMP _USRDLL)
+
     set_target_properties (cryptopp PROPERTIES COMPILE_DEFINITIONS "${_TEMP}")
     set_target_properties (cryptopp PROPERTIES DEBUG_POSTFIX d)
   endif (TARGET cryptopp)

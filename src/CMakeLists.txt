@@ -493,6 +493,8 @@ if(UNIX)
 else()
     add_definitions(-DUNICODE=TRUE)
     add_definitions(-D_UNICODE=TRUE)
+    # Windows 分支需要显式导入 Qt 组件（Svg/WebEngine/WebChannel/WebEngineWidgets）
+    find_package(Qt5 COMPONENTS Widgets Svg WebEngine WebChannel WebEngineWidgets)
     add_executable(WizNote WIN32 ${wiznote_SOURCES} ${wiznote_HEADERS} ${wiznote_FORM_HEADERS} ${wiznote_QM} ${wiznote_RC})
     set_target_properties(${PROJECT_NAME} PROPERTIES AUTOMOC_MOC_OPTIONS "-DQ_OS_WIN32")
 

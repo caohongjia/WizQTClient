@@ -34,6 +34,7 @@ public:
 
     static void messageHandler(QtMsgType type, const QMessageLogContext &context, const QString &msg);
     static void writeLog(const QString& strMsg);
+    static void writeLog(const wchar_t* strMsg);
     static void getAllLogs(QString& text);
     static WizLogger* logger();
 

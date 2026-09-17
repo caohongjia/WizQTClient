@@ -1,0 +1,185 @@
+name: Build Windows EXE
+
+on:
+  push:
+    branches: [master, main, 'ci-windows-build', 'trae/**']
+  pull_request:
+    branches: [master, main]
+  workflow_dispatch:
+    inputs:
+      qt_version:
+        description: 'Qt version to use'
+        required: false
+        default: '5.15.2'
+        type: string
+
+jobs:
+  build-windows:
+    name: Build WizNote for Windows
+    runs-on: windows-latest
+
+    steps:
+      # 1. Checkout 源码
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 2. 安装 Qt 5.15 via aqt（输出到 C:\Qt）
+      - name: Install Qt 5.15 via aqtinstall
+        shell: powershell
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "aqtinstall==3.3.0"
+
+          $QtVersion = "${{ inputs.qt_version }}"
+          if ([string]::IsNullOrEmpty($QtVersion)) { $QtVersion = "5.15.2" }
+
+          Write-Host "Installing Qt $QtVersion windows desktop win64_msvc2019_64 to C:\Qt ..."
+          python -m aqt install-qt -O C:\Qt windows desktop $QtVersion win64_msvc2019_64 -m qtwebengine
+
+          # 探测实际安装位置
+          $qtRoot = "C:\Qt\$QtVersion"
+          $QtPath = $null
+          foreach ($archDir in Get-ChildItem $qtRoot -Directory -ErrorAction SilentlyContinue) {
+            $qmake = Join-Path $archDir.FullName "bin\qmake.exe"
+            if (Test-Path $qmake) {
+              $QtPath = $archDir.FullName
+              Write-Host "FOUND Qt at: $QtPath"
+              break
+            }
+          }
+
+          if (-not $QtPath) {
+            $found = Get-ChildItem -Path "C:\Qt" -Filter "qmake.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($found) { $QtPath = Split-Path $found.FullName -Parent | Split-Path -Parent }
+          }
+
+          if (-not $QtPath) {
+            Write-Error "FAILED: qmake.exe not found anywhere under C:\Qt!"
+            exit 1
+          }
+
+          echo "QT_PATH=$QtPath" >> $env:GITHUB_ENV
+          & "$QtPath\bin\qmake.exe" --version
+
+      # 3. MSVC 环境 + CMake 配置（vswhere 定位 VS，Ninja 生成器）
+      - name: CMake Configure
+        shell: cmd
+        env:
+          QT_PATH: ${{ env.QT_PATH }}
+        run: |
+          echo QT_PATH=%QT_PATH%
+
+          :: 用 vswhere 定位 VS 安装目录
+          set "VSWHERE=%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe"
+          for /f "usebackq tokens=*" %%i in (`"%VSWHERE%" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set "VS_PATH=%%i"
+          echo VS_PATH=%VS_PATH%
+
+          if not defined VS_PATH (
+            echo vswhere did not find VS, listing candidates:
+            dir "C:\Program Files\Microsoft Visual Studio" /b 2>nul
+            exit /b 1
+          )
+
+          :: 导出 VS_PATH 供后续 step 使用（cmd 中 >> 前不能有空格，否则会写入尾随空格）
+          echo VS_PATH=%VS_PATH%>>%GITHUB_ENV%
+
+          :: 加载 MSVC x64 环境
+          call "%VS_PATH%\VC\Auxiliary\Build\vcvars64.bat"
+          if errorlevel 1 (
+            echo vcvars64.bat failed
+            exit /b 1
+          )
+          cl 2>&1 | findstr "19" | findstr "Microsoft"
+
+          :: 确保 Ninja 可用
+          where ninja >nul 2>nul || echo "Ninja not in PATH, will rely on CMake"
+
+          if not exist build mkdir build
+          cd build
+
+          cmake -G Ninja ^
+            -DCMAKE_BUILD_TYPE=Release ^
+            -DCMAKE_PREFIX_PATH="%QT_PATH%" ^
+            ..
+          if errorlevel 1 (
+            echo "CMake configure FAILED"
+            exit /b 1
+          )
+
+      # 4. 编译
+      - name: CMake Build
+        shell: cmd
+        env:
+          VS_PATH: ${{ env.VS_PATH }}
+        run: |
+          :: 每个 step 都是独立 shell，需重新加载 MSVC 环境
+          call "%VS_PATH%\VC\Auxiliary\Build\vcvars64.bat"
+          if errorlevel 1 (
+            echo vcvars64.bat failed
+            exit /b 1
+          )
+          cd build
+          cmake --build . --parallel 4
+          if errorlevel 1 (
+            echo "Build FAILED"
+            exit /b 1
+          )
+          echo "Build succeeded!"
+          dir /s /b *.exe 2>nul
+
+      # 5. 定位可执行文件路径
+      - name: Locate WizNote.exe
+        id: locate
+        shell: powershell
+        run: |
+          $exe = Get-ChildItem -Path build -Recurse -Filter "WizNote.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $exe) {
+            Write-Error "WizNote.exe not found under build/"
+            Get-ChildItem build -ErrorAction SilentlyContinue
+            exit 1
+          }
+          $dir = $exe.DirectoryName
+          echo "EXE_DIR=$dir" >> $env:GITHUB_ENV
+          Write-Host "WizNote.exe at: $dir"
+
+      # 6. 部署 Qt 运行时
+      - name: Deploy Qt runtime (windeployqt)
+        shell: cmd
+        env:
+          QT_PATH: ${{ env.QT_PATH }}
+          EXE_DIR: ${{ env.EXE_DIR }}
+        run: |
+          "%QT_PATH%\bin\windeployqt.exe" --release --no-translations --no-opengl-sw "%EXE_DIR%\WizNote.exe"
+          if errorlevel 1 (
+            echo "windeployqt failed"
+            exit /b 1
+          )
+          echo "windeployqt done"
+
+      # 7. 拷贝 share 资源
+      - name: Copy share resources
+        shell: cmd
+        env:
+          EXE_DIR: ${{ env.EXE_DIR }}
+        run: |
+          if exist share xcopy /E /I /Y share "%EXE_DIR%\share"
+          echo "share copied if present"
+
+      # 8. 打包
+      - name: Package
+        shell: powershell
+        env:
+          EXE_DIR: ${{ env.EXE_DIR }}
+        run: |
+          Write-Host "Packaging from $env:EXE_DIR"
+          Get-ChildItem $env:EXE_DIR
+          Compress-Archive -Path "$env:EXE_DIR\*" -DestinationPath "WizNote-Windows-x64.zip" -Force
+          Get-Item "WizNote-Windows-x64.zip" | Select-Object Name, @{N='SizeMB';E={[math]::Round($_.Length/1MB,1)}}
+
+      # 9. 上传
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: WizNote-Windows-x64
+          path: WizNote-Windows-x64.zip
+          if-no-files-found: error

@@ -245,13 +245,13 @@ ptrdiff_t WizStrRStrI_Pos(const CString& strText, const CString& strFind, ptrdif
 
 QString WizGetHtmlContentHiddenTagBegin()
 {
-    static const QString lpszBegin = _T("<!--WizHtmlContentBegin-->");
+    static const QString lpszBegin = QString::fromUtf8("<!--WizHtmlContentBegin-->");
     return lpszBegin;
 }
 
 QString WizGetHtmlContentHiddenTagEnd()
 {
-    static const QString lpszEnd = _T("<!--WizHtmlContentEnd-->");
+    static const QString lpszEnd = QString::fromUtf8("<!--WizHtmlContentEnd-->");
     return lpszEnd;
 }
 

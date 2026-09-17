@@ -11,9 +11,9 @@
 # PLCrashReporter   use PLCrashReporter for mac, need PLCrashReporter framework
 
 if (APPLE)
-    cmake_minimum_required(VERSION 2.8.12)
+    cmake_minimum_required(VERSION 3.5)
 else(APPLE)
-    cmake_minimum_required(VERSION 2.8.4)
+    cmake_minimum_required(VERSION 3.5)
 endif(APPLE)
 
 set(CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")

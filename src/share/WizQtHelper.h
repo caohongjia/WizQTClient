@@ -115,6 +115,10 @@ public:
     int compareNoCase(const CString& strOther) const { return compare(strOther, Qt::CaseInsensitive); }
     int compare(const CString& strOther) const { return compare(strOther, Qt::CaseSensitive); }
 
+    // UNICODE 下 _T("...") 为 const wchar_t*，QString 无对应 operator==，需在此补齐
+    inline bool operator==(const wchar_t* rhs) const { return compare(CString(rhs)) == 0; }
+    inline bool operator!=(const wchar_t* rhs) const { return !(*this == rhs); }
+
     void format(QString strFormat, ... );
     void empty() { clear(); }
     int find(char ch) const { return indexOf(ch); }
