@@ -10,7 +10,7 @@ on:
       qt_version:
         description: 'Qt version to use'
         required: false
-        default: '5.12.8'
+        default: '5.15.2'
         type: string
 
 jobs:
@@ -32,7 +32,7 @@ jobs:
           python -m pip install "aqtinstall==2.2.4"
           
           $QtVersion = "${{ inputs.qt_version }}"
-          if ([string]::IsNullOrEmpty($QtVersion)) { $QtVersion = "5.12.8" }
+          if ([string]::IsNullOrEmpty($QtVersion)) { $QtVersion = "5.15.2" }
           $MsvcArch  = "msvc2017_64"
           
           Write-Host "Installing Qt $QtVersion $MsvcArch ..."
