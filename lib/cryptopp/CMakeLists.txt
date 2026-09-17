@@ -134,9 +134,13 @@ if (TARGET cryptopp)
   list (APPEND _CRYPTOPP_INSTALL_TARGETS cryptopp)
 endif (TARGET cryptopp)
 
-if (APPLE)
+# The .asm source files are not compiled in this build, so Crypto++ must use
+# its C++ fallbacks instead of the assembler-optimized routines (otherwise the
+# link fails with unresolved Rijndael_Enc_AdvancedProcessBlocks, Baseline_Add,
+# Baseline_Sub, X86_SHA256_HashBlocks, ...).
+if (APPLE OR WIN32)
     add_definitions (-DCRYPTOPP_DISABLE_ASM)
-endif (APPLE)
+endif (APPLE OR WIN32)
 
 if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
     set_target_properties (${_CRYPTOPP_INSTALL_TARGETS} PROPERTIES COMPILE_FLAGS
