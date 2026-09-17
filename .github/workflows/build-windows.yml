@@ -3,6 +3,7 @@ name: Build Windows EXE
 on:
   push:
     branches: [master, main, 'ci-windows-build', 'trae/**']
+    tags: ['v*']
   pull_request:
     branches: [master, main]
   workflow_dispatch:
@@ -156,6 +157,22 @@ jobs:
           )
           echo "windeployqt done"
 
+      # 6.5 拷贝构建产物中的第三方 DLL（如 zlib 的 zlib.dll），windeployqt 不会带出
+      - name: Copy third-party DLLs
+        shell: powershell
+        env:
+          EXE_DIR: ${{ env.EXE_DIR }}
+        run: |
+          $dlls = Get-ChildItem -Path build -Recurse -Filter "*.dll" -ErrorAction SilentlyContinue
+          if ($dlls) {
+            $dlls | ForEach-Object {
+              Copy-Item $_.FullName -Destination $env:EXE_DIR -Force
+              Write-Host "Copied $($_.Name) -> $env:EXE_DIR"
+            }
+          } else {
+            Write-Host "WARNING: no DLLs found under build/"
+          }
+
       # 7. 拷贝 share 资源
       - name: Copy share resources
         shell: cmd
@@ -183,3 +200,29 @@ jobs:
           name: WizNote-Windows-x64
           path: WizNote-Windows-x64.zip
           if-no-files-found: error
+
+  # 10. 打 tag（v*）时自动发布 Release：附上 exe 包，源码包由 GitHub 自动生成
+  release:
+    name: Publish GitHub Release
+    needs: build-windows
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download built exe package
+        uses: actions/download-artifact@v4
+        with:
+          name: WizNote-Windows-x64
+          path: dist
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Release ${{ github.ref_name }}
+          files: dist/WizNote-Windows-x64.zip
+          generate_release_notes: true
