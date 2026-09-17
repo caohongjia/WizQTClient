@@ -80,8 +80,8 @@ jobs:
             exit /b 1
           )
 
-          :: 导出 VS_PATH 供后续 step 使用
-          echo VS_PATH=%VS_PATH% >> %GITHUB_ENV%
+          :: 导出 VS_PATH 供后续 step 使用（cmd 中 >> 前不能有空格，否则会写入尾随空格）
+          echo VS_PATH=%VS_PATH%>>%GITHUB_ENV%
 
           :: 加载 MSVC x64 环境
           call "%VS_PATH%\VC\Auxiliary\Build\vcvars64.bat"
