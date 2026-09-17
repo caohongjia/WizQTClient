@@ -23,7 +23,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 2. 安装 Qt 5.15 via aqt 3.x
+      # 2. 安装 Qt 5.15 via aqt（输出到 C:\Qt）
       - name: Install Qt 5.15 via aqtinstall
         shell: powershell
         run: |
@@ -36,15 +36,11 @@ jobs:
           Write-Host "Installing Qt $QtVersion windows desktop win64_msvc2019_64 to C:\Qt ..."
           python -m aqt install-qt -O C:\Qt windows desktop $QtVersion win64_msvc2019_64 -m qtwebengine
 
-          # aqt 目录名可能带或不带 win64_ 前缀, 探测实际安装位置
+          # 探测实际安装位置
           $qtRoot = "C:\Qt\$QtVersion"
-          Write-Host "Qt root contents:"
-          Get-ChildItem $qtRoot -ErrorAction SilentlyContinue
-
           $QtPath = $null
           foreach ($archDir in Get-ChildItem $qtRoot -Directory -ErrorAction SilentlyContinue) {
             $qmake = Join-Path $archDir.FullName "bin\qmake.exe"
-            Write-Host "  checking: $qmake"
             if (Test-Path $qmake) {
               $QtPath = $archDir.FullName
               Write-Host "FOUND Qt at: $QtPath"
@@ -53,12 +49,8 @@ jobs:
           }
 
           if (-not $QtPath) {
-            Write-Host "Fallback: searching entire C:\Qt for qmake.exe ..."
             $found = Get-ChildItem -Path "C:\Qt" -Filter "qmake.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
-            if ($found) {
-              $QtPath = Split-Path $found.FullName -Parent | Split-Path -Parent
-              Write-Host "Detected Qt path: $QtPath"
-            }
+            if ($found) { $QtPath = Split-Path $found.FullName -Parent | Split-Path -Parent }
           }
 
           if (-not $QtPath) {
@@ -66,120 +58,111 @@ jobs:
             exit 1
           }
 
-          # 导出 Qt 路径给后续 step
           echo "QT_PATH=$QtPath" >> $env:GITHUB_ENV
           & "$QtPath\bin\qmake.exe" --version
 
-      # 3. 下载预编译 OpenSSL
-      - name: Install OpenSSL (prebuilt)
-        shell: powershell
-        run: |
-          $OpenSslUrl = "https://slproweb.com/download/Win64OpenSSL-1_1_1w.msi"
-          $OpenSslMsi = "$env:TEMP\Win64OpenSSL.msi"
-
-          Write-Host "Downloading OpenSSL ..."
-          Invoke-WebRequest -Uri $OpenSslUrl -OutFile $OpenSslMsi -UseBasicParsing
-
-          Write-Host "Installing OpenSSL ..."
-          Start-Process msiexec.exe -ArgumentList '/i', $OpenSslMsi, '/quiet', '/qn' -Wait
-
-          # 探测 OpenSSL 安装位置
-          $OpenSslRoot = $null
-          foreach ($candidate in @("C:\OpenSSL-Win64", "C:\Program Files\OpenSSL-Win64", "C:\OpenSSL")) {
-            if (Test-Path "$candidate\include\openssl\ssl.h") {
-              $OpenSslRoot = $candidate
-              Write-Host "Found OpenSSL at: $OpenSslRoot"
-              break
-            }
-          }
-
-          if (-not $OpenSslRoot) {
-            Write-Warning "OpenSSL headers not found, searching ..."
-            $found = Get-ChildItem -Path "C:\" -Filter "ssl.h" -Recurse -ErrorAction SilentlyContinue | Where-Object { $_.FullName -match "openssl" } | Select-Object -First 1
-            if ($found) {
-              $OpenSslRoot = Split-Path $found.DirectoryName -Parent
-              Write-Host "Detected OpenSSL at: $OpenSslRoot"
-            } else {
-              Write-Warning "OpenSSL not found, build may fail"
-              $OpenSslRoot = "C:\OpenSSL-Win64"
-            }
-          }
-          echo "OPENSSL_ROOT=$OpenSslRoot" >> $env:GITHUB_ENV
-
-      # 4. CMake 配置 (使用 cmd, 加载 MSVC 环境)
+      # 3. MSVC 环境 + CMake 配置（vswhere 定位 VS，Ninja 生成器）
       - name: CMake Configure
         shell: cmd
         env:
           QT_PATH: ${{ env.QT_PATH }}
-          OPENSSL_ROOT: ${{ env.OPENSSL_ROOT }}
         run: |
-          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat" 2>nul
-          if errorlevel 1 (
-            call "C:\Program Files\Microsoft Visual Studio\2022\Professional\VC\Auxiliary\Build\vcvars64.bat" 2>nul
+          echo QT_PATH=%QT_PATH%
+
+          :: 用 vswhere 定位 VS 安装目录
+          set "VSWHERE=%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe"
+          for /f "usebackq tokens=*" %%i in (`"%VSWHERE%" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set "VS_PATH=%%i"
+          echo VS_PATH=%VS_PATH%
+
+          if not defined VS_PATH (
+            echo vswhere did not find VS, listing candidates:
+            dir "C:\Program Files\Microsoft Visual Studio" /b 2>nul
+            exit /b 1
           )
 
-          echo QT_PATH=%QT_PATH%
-          echo OPENSSL_ROOT=%OPENSSL_ROOT%
+          :: 加载 MSVC x64 环境
+          call "%VS_PATH%\VC\Auxiliary\Build\vcvars64.bat"
+          if errorlevel 1 (
+            echo vcvars64.bat failed
+            exit /b 1
+          )
+          cl 2>&1 | findstr "19" | findstr "Microsoft"
+
+          :: 确保 Ninja 可用
+          where ninja >nul 2>nul || echo "Ninja not in PATH, will rely on CMake"
 
           if not exist build mkdir build
           cd build
 
-          cmake -G "Visual Studio 17 2022" -A x64 ^
-            -DCMAKE_PREFIX_PATH="%QT_PATH%" ^
+          cmake -G Ninja ^
             -DCMAKE_BUILD_TYPE=Release ^
-            -DOPENSSL_ROOT_DIR="%OPENSSL_ROOT%" ^
-            -DOPENSSL_INCLUDE_DIR="%OPENSSL_ROOT%\include" ^
-            -DOPENSSL_LIBRARIES="%OPENSSL_ROOT%\lib" ^
-            .. || echo "CMake configure FAILED" && exit /b 1
+            -DCMAKE_PREFIX_PATH="%QT_PATH%" ^
+            ..
+          if errorlevel 1 (
+            echo "CMake configure FAILED"
+            exit /b 1
+          )
 
-      # 5. 编译
+      # 4. 编译
       - name: CMake Build
         shell: cmd
         run: |
           cd build
-          cmake --build . --config Release --parallel 4 || echo "Build FAILED" && exit /b 1
+          cmake --build . --parallel 4
+          if errorlevel 1 (
+            echo "Build FAILED"
+            exit /b 1
+          )
           echo "Build succeeded!"
-          dir Release\*.exe 2>nul
+          dir /s /b *.exe 2>nul
+
+      # 5. 定位可执行文件路径
+      - name: Locate WizNote.exe
+        id: locate
+        shell: powershell
+        run: |
+          $exe = Get-ChildItem -Path build -Recurse -Filter "WizNote.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $exe) {
+            Write-Error "WizNote.exe not found under build/"
+            Get-ChildItem build -ErrorAction SilentlyContinue
+            exit 1
+          }
+          $dir = $exe.DirectoryName
+          echo "EXE_DIR=$dir" >> $env:GITHUB_ENV
+          Write-Host "WizNote.exe at: $dir"
 
       # 6. 部署 Qt 运行时
       - name: Deploy Qt runtime (windeployqt)
         shell: cmd
         env:
           QT_PATH: ${{ env.QT_PATH }}
+          EXE_DIR: ${{ env.EXE_DIR }}
         run: |
-          set QT_BIN=%QT_PATH%\bin
-          set EXE_DIR=build\Release
-
-          if not exist "%EXE_DIR%\WizNote.exe" (
-            echo "WizNote.exe not found! Listing build output:"
-            dir build\Release
-            dir build\src\Release 2>nul
+          "%QT_PATH%\bin\windeployqt.exe" --release --no-translations --no-opengl-sw "%EXE_DIR%\WizNote.exe"
+          if errorlevel 1 (
+            echo "windeployqt failed"
             exit /b 1
           )
-
-          "%QT_BIN%\windeployqt.exe" --release --no-translations --no-opengl-sw "%EXE_DIR%\WizNote.exe"
           echo "windeployqt done"
-          dir "%EXE_DIR%" /B | find /c /v ""
 
-      # 7. 拷贝 OpenSSL DLL 和 share 资源
-      - name: Copy OpenSSL DLLs and share resources
+      # 7. 拷贝 share 资源
+      - name: Copy share resources
         shell: cmd
         env:
-          OPENSSL_ROOT: ${{ env.OPENSSL_ROOT }}
+          EXE_DIR: ${{ env.EXE_DIR }}
         run: |
-          set EXE_DIR=build\Release
-          copy /Y "%OPENSSL_ROOT%\bin\libcrypto-1_1-x64.dll" "%EXE_DIR%\" 2>nul
-          copy /Y "%OPENSSL_ROOT%\bin\libssl-1_1-x64.dll" "%EXE_DIR%\" 2>nul
-          copy /Y "%OPENSSL_ROOT%\bin\libcrypto-3-x64.dll" "%EXE_DIR%\" 2>nul
-          copy /Y "%OPENSSL_ROOT%\bin\libssl-3-x64.dll" "%EXE_DIR%\" 2>nul
-
           if exist share xcopy /E /I /Y share "%EXE_DIR%\share"
+          echo "share copied if present"
 
       # 8. 打包
       - name: Package
         shell: powershell
+        env:
+          EXE_DIR: ${{ env.EXE_DIR }}
         run: |
-          Compress-Archive -Path "build\Release\*" -DestinationPath "WizNote-Windows-x64.zip" -Force
+          Write-Host "Packaging from $env:EXE_DIR"
+          Get-ChildItem $env:EXE_DIR
+          Compress-Archive -Path "$env:EXE_DIR\*" -DestinationPath "WizNote-Windows-x64.zip" -Force
           Get-Item "WizNote-Windows-x64.zip" | Select-Object Name, @{N='SizeMB';E={[math]::Round($_.Length/1MB,1)}}
 
       # 9. 上传
