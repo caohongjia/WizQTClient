@@ -166,8 +166,13 @@ jobs:
           $dlls = Get-ChildItem -Path build -Recurse -Filter "*.dll" -ErrorAction SilentlyContinue
           if ($dlls) {
             $dlls | ForEach-Object {
-              Copy-Item $_.FullName -Destination $env:EXE_DIR -Force
-              Write-Host "Copied $($_.Name) -> $env:EXE_DIR"
+              $dest = Join-Path $env:EXE_DIR $_.Name
+              if ($_.FullName -eq $dest) {
+                Write-Host "Skip $($_.Name) (already in EXE_DIR)"
+              } else {
+                Copy-Item $_.FullName -Destination $env:EXE_DIR -Force
+                Write-Host "Copied $($_.Name) -> $env:EXE_DIR"
+              }
             }
           } else {
             Write-Host "WARNING: no DLLs found under build/"
