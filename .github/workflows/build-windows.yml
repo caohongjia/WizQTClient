@@ -156,6 +156,19 @@ jobs:
           )
           echo "windeployqt done"
 
+      # 6.5 拷贝第三方 DLL（zlib 以 SHARED 构建，产物 zlib.dll 需手动带出）
+      - name: Copy zlib.dll
+        shell: cmd
+        env:
+          EXE_DIR: ${{ env.EXE_DIR }}
+        run: |
+          if exist "build\lib\zlib\zlib.dll" (
+            copy /Y "build\lib\zlib\zlib.dll" "%EXE_DIR%\"
+            echo "zlib.dll copied"
+          ) else (
+            echo "WARNING: zlib.dll not found under build\lib\zlib"
+          )
+
       # 7. 拷贝 share 资源
       - name: Copy share resources
         shell: cmd
