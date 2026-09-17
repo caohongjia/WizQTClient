@@ -80,6 +80,9 @@ jobs:
             exit /b 1
           )
 
+          :: 导出 VS_PATH 供后续 step 使用
+          echo VS_PATH=%VS_PATH% >> %GITHUB_ENV%
+
           :: 加载 MSVC x64 环境
           call "%VS_PATH%\VC\Auxiliary\Build\vcvars64.bat"
           if errorlevel 1 (
@@ -106,7 +109,15 @@ jobs:
       # 4. 编译
       - name: CMake Build
         shell: cmd
+        env:
+          VS_PATH: ${{ env.VS_PATH }}
         run: |
+          :: 每个 step 都是独立 shell，需重新加载 MSVC 环境
+          call "%VS_PATH%\VC\Auxiliary\Build\vcvars64.bat"
+          if errorlevel 1 (
+            echo vcvars64.bat failed
+            exit /b 1
+          )
           cd build
           cmake --build . --parallel 4
           if errorlevel 1 (
