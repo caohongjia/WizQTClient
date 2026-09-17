@@ -174,15 +174,15 @@ if (TARGET dlltest)
 endif (TARGET dlltest)
 
 if (WIN32)
-  get_target_property (_TEMP cryptopp COMPILE_DEFINITIONS)
-
-  if (NOT _TEMP)
-    unset (_TEMP)
-  endif (NOT _TEMP)
-
-  list (APPEND _TEMP _USRDLL)
-
   if (TARGET cryptopp)
+    get_target_property (_TEMP cryptopp COMPILE_DEFINITIONS)
+
+    if (NOT _TEMP)
+      unset (_TEMP)
+    endif (NOT _TEMP)
+
+    list (APPEND _TEMP _USRDLL)
+
     set_target_properties (cryptopp PROPERTIES COMPILE_DEFINITIONS "${_TEMP}")
     set_target_properties (cryptopp PROPERTIES DEBUG_POSTFIX d)
   endif (TARGET cryptopp)
