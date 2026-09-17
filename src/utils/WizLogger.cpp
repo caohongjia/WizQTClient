@@ -134,6 +134,10 @@ void WizLogger::writeLog(const QString& strMsg)
 
     fprintf(stderr, "[INFO] %s\n", strMsg.toUtf8().constData());
 }
+void WizLogger::writeLog(const wchar_t* strMsg)
+{
+    writeLog(QString::fromWCharArray(strMsg));
+}
 void WizLogger::getAllLogs(QString& text)
 {
     logger()->getAll(text);
