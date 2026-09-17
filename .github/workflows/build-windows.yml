@@ -28,15 +28,15 @@ jobs:
         shell: powershell
         run: |
           python -m pip install --upgrade pip
-          # aqtinstall 3.x 不兼容 Qt 5.12, 固定 2.5.x
-          python -m pip install "aqtinstall==2.2.4"
+          # 使用最新 aqt 3.3.0
+          python -m pip install "aqtinstall==3.3.0"
           
           $QtVersion = "${{ inputs.qt_version }}"
           if ([string]::IsNullOrEmpty($QtVersion)) { $QtVersion = "5.15.2" }
-          $MsvcArch  = "msvc2017_64"
+          $MsvcArch  = "win64_msvc2019_64"
           
           Write-Host "Installing Qt $QtVersion $MsvcArch ..."
-          python -m aqt install-qt windows desktop $QtVersion $MsvcArch -m qtwebengine qtwebsockets qtwebchannel qtsvg qttools
+          python -m aqt install-qt windows desktop $QtVersion $MsvcArch --modules qtwebengine qtwebsockets qtwebchannel qtsvg qttools
           
           $QtPath = "C:\Qt\$QtVersion\$MsvcArch"
           if (-not (Test-Path "$QtPath\bin\qmake.exe")) {
@@ -82,7 +82,7 @@ jobs:
           call "C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Auxiliary\Build\vcvars64.bat" 2>nul || ^
           echo "vcvars64 not found, trying msbuild directly"
           
-          set QT_PATH=C:\Qt\%QT_VERSION%\msvc2017_64
+          set QT_PATH=C:\Qt\%QT_VERSION%\win64_msvc2019_64
           set OPENSSL_ROOT=C:\OpenSSL-Win64
           if not exist "%OPENSSL_ROOT%\include" set OPENSSL_ROOT=C:\OpenSSL
           if not exist "%OPENSSL_ROOT%\include" set OPENSSL_ROOT=C:\Program Files\OpenSSL-Win64
@@ -124,7 +124,7 @@ jobs:
         env:
           QT_VERSION: ${{ inputs.qt_version }}
         run: |
-          set QT_BIN=C:\Qt\%QT_VERSION%\msvc2017_64\bin
+          set QT_BIN=C:\Qt\%QT_VERSION%\win64_msvc2019_64\bin
           set EXE_DIR=build\Release
           
           if not exist "%EXE_DIR%\WizNote.exe" (
