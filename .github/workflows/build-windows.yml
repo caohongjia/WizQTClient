@@ -2,7 +2,7 @@ name: Build Windows EXE
 
 on:
   push:
-    branches: [master, main, 'trae/**']
+    branches: [master, main, 'ci-windows-build', 'trae/**']
   pull_request:
     branches: [master, main]
   workflow_dispatch:
@@ -11,11 +11,6 @@ on:
         description: 'Qt version to use'
         required: false
         default: '5.12.8'
-        type: string
-      msvc_version:
-        description: 'MSVC version for Qt (msvc2017_64 or msvc2019_64)'
-        required: false
-        default: 'msvc2017_64'
         type: string
 
 jobs:
@@ -27,135 +22,151 @@ jobs:
       # 1. Checkout 源码
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          submodules: recursive
 
-      # 2. 安装 Qt (通过 aqtinstall)
-      - name: Install Qt via aqtinstall
+      # 2. 安装 Qt 5.12 (aqt 2.x 兼容旧版 Qt)
+      - name: Install Qt 5.12 via aqtinstall
         shell: powershell
         run: |
           python -m pip install --upgrade pip
-          python -m pip install aqtinstall
+          # aqtinstall 3.x 不兼容 Qt 5.12, 固定 2.5.x
+          python -m pip install "aqtinstall==2.5.*"
           
           $QtVersion = "${{ inputs.qt_version }}"
-          $MsvcArch  = "${{ inputs.msvc_version }}"
+          $MsvcArch  = "msvc2017_64"
           
-          Write-Host "Installing Qt $QtVersion for $MsvcArch ..."
+          Write-Host "Installing Qt $QtVersion $MsvcArch ..."
           python -m aqt install-qt windows desktop $QtVersion $MsvcArch `
-            -m qtwebengine qtwebsockets qtwebchannel qtsvg qttools qtbase
+            -m qtwebengine qtwebsockets qtwebchannel qtsvg qttools
           
-          Write-Host "Qt installed at: C:\Qt\$QtVersion\$MsvcArch"
-          Get-ChildItem "C:\Qt\$QtVersion\$MsvcArch\bin" | Select-Object -First 10
+          $QtPath = "C:\Qt\$QtVersion\$MsvcArch"
+          if (-not (Test-Path "$QtPath\bin\qmake.exe")) {
+            Write-Error "Qt installation failed - qmake.exe not found at $QtPath\bin\"
+            exit 1
+          }
+          Write-Host "Qt installed at: $QtPath"
+          & "$QtPath\bin\qmake.exe" --version
 
-      # 3. 安装 OpenSSL (Windows 需要)
-      - name: Install OpenSSL via vcpkg
+      # 3. 下载预编译 OpenSSL
+      - name: Install OpenSSL (prebuilt)
         shell: powershell
         run: |
-          git clone https://github.com/microsoft/vcpkg.git C:\vcpkg
-          cd C:\vcpkg
-          .\bootstrap-vcpkg.bat
-          .\vcpkg install openssl:x64-windows --recurse
-          .\vcpkg integrate install
-          Write-Host "OpenSSL installed"
+          $OpenSslUrl = "https://slproweb.com/download/Win64OpenSSL-1_1_1w.msi"
+          $OpenSslMsi = "$env:TEMP\Win64OpenSSL.msi"
+          
+          Write-Host "Downloading OpenSSL ..."
+          Invoke-WebRequest -Uri $OpenSslUrl -OutFile $OpenSslMsi
+          
+          Write-Host "Installing OpenSSL ..."
+          Start-Process msiexec.exe -ArgumentList '/i', $OpenSslMsi, '/quiet', 'TARGETDIR=C:\OpenSSL' -Wait
+          
+          if (Test-Path "C:\OpenSSL\bin\libcrypto-1_1-x64.dll") {
+            Write-Host "OpenSSL installed successfully"
+          } else {
+            # 尝试其他常见路径
+            $found = Get-ChildItem -Path "C:\" -Filter "libcrypto*.dll" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($found) {
+              Write-Host "Found OpenSSL at: $($found.DirectoryName)"
+            } else {
+              Write-Warning "OpenSSL not found, build may fail"
+            }
+          }
 
-      # 4. 配置 CMake
+      # 4. 设置 MSVC 环境 + CMake 配置
       - name: CMake Configure
-        shell: powershell
+        shell: cmd
         env:
           QT_VERSION: ${{ inputs.qt_version }}
-          MSVC_ARCH: ${{ inputs.msvc_version }}
         run: |
-          $QtPath = "C:\Qt\$env:QT_VERSION\$env:MSVC_ARCH"
-          $OpenSslDir = "C:\vcpkg\installed\x64-windows"
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat" 2>nul || ^
+          call "C:\Program Files\Microsoft Visual Studio\2022\Professional\VC\Auxiliary\Build\vcvars64.bat" 2>nul || ^
+          call "C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Auxiliary\Build\vcvars64.bat" 2>nul || ^
+          echo "vcvars64 not found, trying msbuild directly"
           
-          New-Item -ItemType Directory -Force build | Out-Null
-          Push-Location build
+          set QT_PATH=C:\Qt\%QT_VERSION%\msvc2017_64
+          set OPENSSL_ROOT=C:\OpenSSL-Win64
+          if not exist "%OPENSSL_ROOT%\include" set OPENSSL_ROOT=C:\OpenSSL
+          if not exist "%OPENSSL_ROOT%\include" set OPENSSL_ROOT=C:\Program Files\OpenSSL-Win64
           
-          cmake -G "Visual Studio 17 2022" -A x64 `
-            -DCMAKE_PREFIX_PATH="$QtPath" `
-            -DCMAKE_BUILD_TYPE=Release `
-            -DOPENSSL_ROOT_DIR="$OpenSslDir" `
-            -DOPENSSL_INCLUDE_DIR="$OpenSslDir\include" `
-            -DOPENSSL_LIBRARIES="$OpenSslDir\lib" `
+          echo Qt path: %QT_PATH%
+          echo OpenSSL root: %OPENSSL_ROOT%
+          
+          if not exist build mkdir build
+          cd build
+          
+          cmake -G "Visual Studio 17 2022" -A x64 ^
+            -DCMAKE_PREFIX_PATH="%QT_PATH%" ^
+            -DCMAKE_BUILD_TYPE=Release ^
+            -DOPENSSL_ROOT_DIR="%OPENSSL_ROOT%" ^
+            -DOPENSSL_INCLUDE_DIR="%OPENSSL_ROOT%\include" ^
+            -DOPENSSL_LIBRARIES="%OPENSSL_ROOT%\lib" ^
             ..
           
-          Pop-Location
+          if errorlevel 1 (
+            echo "CMake configure FAILED"
+            exit /b 1
+          )
 
       # 5. 编译
       - name: CMake Build
-        shell: powershell
+        shell: cmd
         run: |
-          cmake --build build --config Release --parallel 4 --verbose
+          cd build
+          cmake --build . --config Release --parallel 4
+          if errorlevel 1 (
+            echo "Build FAILED"
+            exit /b 1
+          )
+          echo "Build succeeded!"
 
-      # 6. 部署 Qt 依赖 (windeployqt)
-      - name: Deploy Qt runtime
-        shell: powershell
+      # 6. 部署 Qt 运行时
+      - name: Deploy Qt runtime (windeployqt)
+        shell: cmd
         env:
           QT_VERSION: ${{ inputs.qt_version }}
-          MSVC_ARCH: ${{ inputs.msvc_version }}
         run: |
-          $QtBin = "C:\Qt\$env:QT_VERSION\$env:MSVC_ARCH\bin"
-          $ExeDir = "build\Release"
+          set QT_BIN=C:\Qt\%QT_VERSION%\msvc2017_64\bin
+          set EXE_DIR=build\Release
           
-          if (Test-Path "$ExeDir\WizNote.exe") {
-            & "$QtBin\windeployqt.exe" --release --no-translations `
-              --no-opengl-sw "$ExeDir\WizNote.exe"
-            Write-Host "windeployqt completed"
-          } else {
-            Write-Error "WizNote.exe not found in $ExeDir"
-            Get-ChildItem build -Recurse -Filter "WizNote.exe"
-            exit 1
-          }
+          if not exist "%EXE_DIR%\WizNote.exe" (
+            echo "WizNote.exe not found!"
+            exit /b 1
+          )
+          
+          "%QT_BIN%\windeployqt.exe" --release --no-translations --no-opengl-sw "%EXE_DIR%\WizNote.exe"
+          
+          # 拷贝 OpenSSL DLL
+          for %%d in (C:\OpenSSL-Win64 C:\OpenSSL "C:\Program Files\OpenSSL-Win64") do (
+            if exist "%%d\bin\libcrypto-1_1-x64.dll" (
+              copy /Y "%%d\bin\libcrypto-1_1-x64.dll" "%EXE_DIR%\"
+              copy /Y "%%d\bin\libssl-1_1-x64.dll" "%EXE_DIR%\"
+            )
+          )
+          
+          echo "windeployqt done"
+          dir "%EXE_DIR%" /B | find /c /v ""
 
       # 7. 拷贝 share 资源
-      - name: Copy resource files
-        shell: powershell
+      - name: Copy share resources
+        shell: cmd
         run: |
-          $ExeDir = "build\Release"
-          if (Test-Path "share") {
-            Copy-Item -Recurse -Force share "$ExeDir\share"
-            Write-Host "share/ copied"
-          }
-          # OpenSSL DLL 也拷贝过去
-          $OpenSslBin = "C:\vcpkg\installed\x64-windows\bin"
-          if (Test-Path "$OpenSslBin\libcrypto-3-x64.dll") {
-            Copy-Item "$OpenSslBin\libcrypto-3-x64.dll" "$ExeDir\"
-            Copy-Item "$OpenSslBin\libssl-3-x64.dll" "$ExeDir\"
-          }
-          Get-ChildItem $ExeDir | Select-Object Name
+          if exist share (
+            xcopy /E /I /Y share build\Release\share
+            echo "share/ copied"
+          )
 
-      # 8. 打包 Release
-      - name: Package release
+      # 8. 打包
+      - name: Package and upload
         shell: powershell
         run: |
           $ExeDir = "build\Release"
           $ZipName = "WizNote-Windows-x64.zip"
           Compress-Archive -Path "$ExeDir\*" -DestinationPath $ZipName -Force
-          Write-Host "Package created: $ZipName"
-          Get-Item $ZipName | Select-Object Name, Length
+          Write-Host "Package: $ZipName ($((Get-Item $ZipName).Length / 1MB) MB)"
 
-      # 9. 上传 Artifact
-      - name: Upload build artifact
+      # 9. 上传 Artifacts
+      - name: Upload EXE artifact
         uses: actions/upload-artifact@v4
         with:
-          name: WizNote-Windows-x64
-          path: |
-            build/Release/WizNote.exe
-            build/Release/*.dll
-            build/Release/*.pak
-            build/Release/resources
-            build/Release/share
-            build/Release/platforms
-            build/Release/imageformats
-            build/Release/styles
-            build/Release/translations
-            build/Release/qtwebengine_dictionaries
-          if-no-files-found: warn
-
-      # 10. 上传完整 ZIP
-      - name: Upload zip artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: WizNote-Windows-x64-zip
+          name: WizNote-Windows-x64-exe
           path: WizNote-Windows-x64.zip
-          if-no-files-found: warn
+          if-no-files-found: error
