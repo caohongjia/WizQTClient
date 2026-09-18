@@ -24,11 +24,8 @@ QString WizPathResolve::resourcesPath()
     addBackslash(strPath);
     return strPath;
 #else
-    QDir dir(appPath());
-    dir.cdUp();
-    dir.cd("share/wiznote");
-    QString strPath = dir.path();
-    addBackslash(strPath);
+    // 资源目录位于可执行文件同级的 share/ 下（例如 <exe_dir>/share/）
+    QString strPath = appPath() + "share/";
     return strPath;
 #endif
 }

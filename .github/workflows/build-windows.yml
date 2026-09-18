@@ -187,26 +187,77 @@ jobs:
           if exist share xcopy /E /I /Y share "%EXE_DIR%\share"
           echo "share copied if present"
 
-      # 8. 打包
-      - name: Package
+      # 8. 制作干净的安装源目录（排除编译中间产物 obj / CMakeFiles 等）
+      - name: Prepare clean staging dir
         shell: powershell
         env:
           EXE_DIR: ${{ env.EXE_DIR }}
         run: |
-          Write-Host "Packaging from $env:EXE_DIR"
-          Get-ChildItem $env:EXE_DIR
-          Compress-Archive -Path "$env:EXE_DIR\*" -DestinationPath "WizNote-Windows-x64.zip" -Force
+          $stage = Join-Path $env:TEMP "wiznote-install"
+          if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
+          New-Item -ItemType Directory -Path $stage | Out-Null
+          Write-Host "Staging from $env:EXE_DIR -> $stage"
+          Get-ChildItem -Path $env:EXE_DIR -Force | ForEach-Object {
+            $name = $_.Name
+            # 跳过编译中间产物与 CMake 生成物
+            if ($name -in @('CMakeFiles','WizNote_autogen','test','__','.ninja_deps','.ninja_log','CMakeCache.txt','cmake_install.cmake')) {
+              Write-Host "Skip build artifact: $name"
+              return
+            }
+            if ($_.Extension -in @('.obj','.o','.lib')) {
+              Write-Host "Skip object file: $name"
+              return
+            }
+            Copy-Item $_.FullName -Destination $stage -Recurse -Force
+          }
+          Write-Host "Staging completed."
+          Get-ChildItem $stage | Select-Object Name
+
+      # 9. 用 Inno Setup 生成安装程序（支持选择安装目录）
+      - name: Build Inno Setup installer
+        shell: powershell
+        env:
+          STAGE_DIR: ${{ env.TEMP }}\wiznote-install
+        run: |
+          # windows-latest 自带 Inno Setup 即可，若缺失则通过 choco 安装
+          if (-not (Test-Path "C:\Program Files (x86)\Inno Setup 6\ISCC.exe")) {
+            Write-Host "Installing Inno Setup via choco..."
+            choco install innosetup -y --no-progress
+          }
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            Write-Error "ISCC.exe not found"
+            exit 1
+          }
+          $issScript = "$env:GITHUB_WORKSPACE\installer\WizNote-Windows-x64.iss"
+          & $iscc "$issScript" "/DMyBuildDir=$env:STAGE_DIR"
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "ISCC failed with exit code $LASTEXITCODE"
+            exit $LASTEXITCODE
+          }
+          Get-ChildItem "$env:GITHUB_WORKSPACE\output" | Select-Object Name
+
+      # 10. 打包便携版 zip
+      - name: Package
+        shell: powershell
+        env:
+          STAGE_DIR: ${{ env.TEMP }}\wiznote-install
+        run: |
+          Write-Host "Packaging from $env:STAGE_DIR"
+          Compress-Archive -Path "$env:STAGE_DIR\*" -DestinationPath "WizNote-Windows-x64.zip" -Force
           Get-Item "WizNote-Windows-x64.zip" | Select-Object Name, @{N='SizeMB';E={[math]::Round($_.Length/1MB,1)}}
 
-      # 9. 上传
+      # 12. 上传（安装 exe + 便携 zip）
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: WizNote-Windows-x64
-          path: WizNote-Windows-x64.zip
+          path: |
+            WizNote-Windows-x64.zip
+            output/*.exe
           if-no-files-found: error
 
-  # 10. 打 tag（v*）时自动发布 Release：附上 exe 包，源码包由 GitHub 自动生成
+  # 14. 打 tag（v*）时自动发布 Release：附上安装 exe + 便携 zip，源码包由 GitHub 自动生成
   release:
     name: Publish GitHub Release
     needs: build-windows
@@ -229,5 +280,5 @@ jobs:
         with:
           tag_name: ${{ github.ref_name }}
           name: Release ${{ github.ref_name }}
-          files: dist/WizNote-Windows-x64.zip
+          files: dist/**
           generate_release_notes: true
