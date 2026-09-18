@@ -212,12 +212,15 @@ jobs:
           }
           Write-Host "Staging completed."
           Get-ChildItem $stage | Select-Object Name
+          # 导出 stage 绝对路径供后续步骤使用
+          "STAGE_DIR=$stage" | Out-File -FilePath $env:GITHUB_ENV -Append
+          Write-Host "STAGE_DIR set to $stage"
 
       # 9. 用 Inno Setup 生成安装程序（支持选择安装目录）
       - name: Build Inno Setup installer
         shell: powershell
         env:
-          STAGE_DIR: ${{ env.TEMP }}\wiznote-install
+          STAGE_DIR: ${{ env.STAGE_DIR }}
         run: |
           # windows-latest 自带 Inno Setup 即可，若缺失则通过 choco 安装
           if (-not (Test-Path "C:\Program Files (x86)\Inno Setup 6\ISCC.exe")) {
@@ -241,7 +244,7 @@ jobs:
       - name: Package
         shell: powershell
         env:
-          STAGE_DIR: ${{ env.TEMP }}\wiznote-install
+          STAGE_DIR: ${{ env.STAGE_DIR }}
         run: |
           Write-Host "Packaging from $env:STAGE_DIR"
           Compress-Archive -Path "$env:STAGE_DIR\*" -DestinationPath "WizNote-Windows-x64.zip" -Force

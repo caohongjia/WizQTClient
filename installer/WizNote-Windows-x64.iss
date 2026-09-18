@@ -23,8 +23,8 @@ Uninstallable=yes
 ArchitecturesInstallIn64BitMode=x64
 
 [Languages]
+; 简体中文使用默认语言文件；英文内建，无需重复声明
 Name: "chinesesimplified"; MessagesFile: "compiler:Default.isl"
-Name: "english"; MessagesFile: "compiler:Languages\English.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
